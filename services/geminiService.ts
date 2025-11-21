@@ -3,9 +3,20 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { AnalysisResult, ReferenceAsset } from "../types";
 
 const getAiClient = () => {
-  // Check for manual key first, then environment variable
+  // 1. Check for manual key stored in browser (User Input)
   const manualKey = localStorage.getItem('qs_api_key');
-  return new GoogleGenAI({ apiKey: manualKey || process.env.API_KEY || '' });
+  
+  // 2. Check for environment variable (Safe replacement by Vite)
+  // If not defined in vite.config.ts, this string remains empty, it won't crash.
+  const envKey = process.env.API_KEY; 
+
+  const finalKey = manualKey || envKey;
+
+  if (!finalKey) {
+    throw new Error("API Key is missing. Please click the Settings icon and enter your Google Gemini API Key.");
+  }
+
+  return new GoogleGenAI({ apiKey: finalKey });
 };
 
 export const analyzeImageIdentity = async (assets: ReferenceAsset[], mimeType: string = 'image/jpeg'): Promise<AnalysisResult> => {
@@ -80,9 +91,13 @@ export const analyzeImageIdentity = async (assets: ReferenceAsset[], mimeType: s
     if (!text) throw new Error("No response from AI");
     
     return JSON.parse(text.trim()) as AnalysisResult;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Analysis failed:", error);
-    throw new Error("Failed to analyze image identity. Check API Key.");
+    // Re-throw with a user-friendly message if it's likely an API key issue
+    if (error.message && (error.message.includes('API key') || error.message.includes('403') || error.message.includes('400'))) {
+       throw new Error("API Key Invalid or Missing. Please check Settings.");
+    }
+    throw error;
   }
 };
 
@@ -145,8 +160,11 @@ export const generateCharacterImage = async (
     
     throw new Error("No image generated");
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Generation failed:", error);
+     if (error.message && (error.message.includes('API key') || error.message.includes('403'))) {
+       throw new Error("API Key Invalid or Missing. Please check Settings.");
+    }
     throw new Error("Failed to generate image.");
   }
 };

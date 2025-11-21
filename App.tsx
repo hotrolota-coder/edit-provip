@@ -79,24 +79,36 @@ export default function App() {
   }, []);
 
   const checkApiKey = async () => {
-    // Check Local Storage First
+    // 1. Check Local Storage (Manual Entry)
     const manualKey = localStorage.getItem('qs_api_key');
     if (manualKey) {
       setApiKeyStatus('set');
       return;
     }
 
-    // Check AI Studio
+    // 2. Check Environment Variable (Vite injected)
+    // process.env.API_KEY is guaranteed to be a string due to vite.config.ts
+    if (process.env.API_KEY && process.env.API_KEY.length > 0) {
+       setApiKeyStatus('set');
+       return;
+    }
+
+    // 3. Check AI Studio (if available)
     const aiStudio = (window as any).aistudio;
     if (aiStudio) {
       const hasKey = await aiStudio.hasSelectedApiKey();
       setApiKeyStatus(hasKey ? 'set' : 'unset');
       if (!hasKey) {
-        setShowSettings(true); // Prompt user if no key
+        // Don't force open, just show unset status
+        setApiKeyStatus('unset'); 
       }
     } else {
-      // Fallback for env var
-      setApiKeyStatus('set'); 
+      // Default to unset if nothing found
+      setApiKeyStatus('unset');
+      // Optionally open settings automatically if it's the first time
+      if (!localStorage.getItem('qs_api_key')) {
+        // setShowSettings(true); // Optional: Force open settings
+      }
     }
   };
 
@@ -115,7 +127,7 @@ export default function App() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
       // Convert FileList to Array
-      const files = Array.from(event.target.files);
+      const files = Array.from(event.target.files) as File[];
       processFiles(files);
     }
     // Reset input
@@ -196,20 +208,13 @@ export default function App() {
 
     if (newQueue.length === 0) {
       // All cropped!
-      // If this was the FIRST upload ever, analyze immediately? 
-      // OR, just go to Idle and let user click Analyze. 
-      // Let's Auto-Analyze if it's the initial setup, otherwise just go to IDLE so they can see the stack.
-      
       if (referenceAssets.length === 0) { 
         // This was the first one added
         analyzeSource([newAsset]);
       } else {
         setState(AppState.IDLE);
-        // Should we re-analyze automatically if they added a new ref? 
-        // Better to let them click "Update Analysis" or "Analyze" to save tokens.
       }
     }
-    // If queue has more, CropInterface stays open for the next one automatically (handled by render)
   };
 
   const handleCropCancel = () => {
@@ -233,6 +238,12 @@ export default function App() {
   };
 
   const analyzeSource = async (assetsToAnalyze: ReferenceAsset[]) => {
+    // Check for API Key before starting
+    if (apiKeyStatus === 'unset') {
+      setShowSettings(true);
+      return;
+    }
+
     setState(AppState.ANALYZING);
     setProgressMessage(
       assetsToAnalyze.length > 1 
@@ -247,13 +258,17 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setState(AppState.ERROR);
-      setProgressMessage('Scan interrupted. Please check your API Connection in Settings.');
+      setProgressMessage('Scan interrupted. Please check your API Key in Settings.');
     }
   };
 
-  // MODIFIED: Automatically archives current session before generating new one
   const generateAlbum = async () => {
     if (!analysis || referenceAssets.length === 0) return;
+    
+    if (apiKeyStatus === 'unset') {
+      setShowSettings(true);
+      return;
+    }
 
     // 1. Archive existing if meaningful
     if (generatedImages.length > 0) {
@@ -305,7 +320,7 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setState(AppState.ERROR);
-      setProgressMessage('Generation sequence interrupted. Check connectivity.');
+      setProgressMessage('Generation sequence interrupted. Check connectivity or API Key.');
     }
   };
 
@@ -776,3 +791,4 @@ export default function App() {
       `}</style>
     </div>
   );
+}
