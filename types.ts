@@ -7,19 +7,21 @@ export interface GeneratedImage {
   timestamp: number;
 }
 
-export interface ReferenceImage {
+export interface ReferenceAsset {
   id: string;
-  original: string; // Base64 full image
-  crop: string;     // Base64 cropped face
+  croppedBase64: string; // The face crop used for analysis
+  originalBase64: string; // The full image used for generation reference
   timestamp: number;
+  isPrimary: boolean;
 }
 
 export interface AlbumSession {
   id: string;
   timestamp: number;
   images: GeneratedImage[];
-  referenceDeck: ReferenceImage[]; // Now stores multiple sources
+  referenceAssets: ReferenceAsset[]; // Updated from single string
   analysisSummary: string;
+  sourceImageStub?: string;
 }
 
 export interface AnalysisResult {
@@ -29,8 +31,9 @@ export interface AnalysisResult {
   photographicStyle: string; // Camera angles, lens type, selfie vs portrait
   detectedGender: string;
   keyFeatures: string[];
+  vibeAnalysis?: string; // New: Analysis of the overall vibe across multiple photos
+  consistencyNotes?: string; // New: What stays the same across photos?
   ethnicityEstimate?: string;
-  compositeScore?: number; // How consistent the images are
 }
 
 export enum AppState {

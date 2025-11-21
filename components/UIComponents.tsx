@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { XIcon } from './Icons';
+import { ReferenceAsset } from '../types';
+import { TrashIcon, SparklesIcon } from './Icons';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -101,24 +102,56 @@ export const QuantitySelector: React.FC<QuantitySelectorProps> = ({ value, onCha
   );
 };
 
-export const ReferenceThumbnail: React.FC<{ 
-  image: string; 
-  crop: string; 
-  onDelete: () => void; 
-}> = ({ image, crop, onDelete }) => (
-  <div className="relative group w-16 h-20 sm:w-20 sm:h-24 rounded-lg overflow-hidden border border-white/10 hover:border-neon-blue/50 transition-all bg-black shadow-lg">
-    <img src={image} className="w-full h-full object-cover opacity-50 group-hover:opacity-100 transition-opacity" alt="ref" />
-    
-    {/* Mini crop overlay */}
-    <div className="absolute bottom-0 right-0 w-8 h-8 border-t border-l border-white/20 bg-black">
-       <img src={crop} className="w-full h-full object-cover" alt="crop" />
-    </div>
+interface AssetStackProps {
+  assets: ReferenceAsset[];
+  onRemove: (id: string) => void;
+  onAddClick: () => void;
+}
 
-    <button 
-      onClick={(e) => { e.stopPropagation(); onDelete(); }}
-      className="absolute top-1 right-1 w-5 h-5 bg-red-500/80 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 hover:bg-red-500 transition-all transform scale-75 group-hover:scale-100"
-    >
-      <XIcon />
-    </button>
-  </div>
-);
+export const AssetStack: React.FC<AssetStackProps> = ({ assets, onRemove, onAddClick }) => {
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between mb-3">
+        <label className="text-xs font-mono text-gray-400 uppercase tracking-wider">Identity Matrix ({assets.length})</label>
+        {assets.length > 1 && <Badge color="neon-purple">Multi-Ref Fusion Active</Badge>}
+      </div>
+      
+      <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide snap-x">
+        {/* Add Button */}
+        <button 
+          onClick={onAddClick}
+          className="snap-start shrink-0 w-20 h-24 rounded-xl border border-dashed border-white/20 hover:border-neon-blue hover:bg-white/5 flex flex-col items-center justify-center gap-2 transition-all group"
+        >
+          <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <span className="text-xl text-white font-light">+</span>
+          </div>
+          <span className="text-[9px] text-gray-400 uppercase font-bold">Add Ref</span>
+        </button>
+
+        {/* Asset List */}
+        {assets.map((asset, idx) => (
+          <div key={asset.id} className="snap-start shrink-0 relative group w-20 h-24">
+            <div className={`w-full h-full rounded-xl overflow-hidden border ${asset.isPrimary ? 'border-neon-blue shadow-[0_0_10px_rgba(0,243,255,0.3)]' : 'border-white/10'}`}>
+              <img src={asset.croppedBase64} alt={`ref-${idx}`} className="w-full h-full object-cover" />
+              
+              {/* Primary Badge */}
+              {asset.isPrimary && (
+                <div className="absolute bottom-0 inset-x-0 bg-neon-blue/90 text-black text-[8px] font-bold text-center py-0.5">
+                  ANCHOR
+                </div>
+              )}
+            </div>
+
+            {/* Remove Button */}
+            <button 
+              onClick={(e) => { e.stopPropagation(); onRemove(asset.id); }}
+              className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:scale-110 z-10"
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

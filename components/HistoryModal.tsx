@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AlbumSession } from '../types';
 import { HistoryIcon, XIcon, TrashIcon } from './Icons';
@@ -42,7 +43,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({
                   className="group relative glass-panel p-3 rounded-xl cursor-pointer hover:bg-white/5 hover:border-neon-blue/30 transition-all flex gap-4 items-start"
                 >
                    <div className="w-16 h-16 rounded-lg bg-black overflow-hidden shrink-0 border border-white/10">
-                     <img src={session.referenceDeck?.[0]?.crop || (session as any).sourceImageStub} className="w-full h-full object-cover opacity-80 group-hover:opacity-100" alt="thumb" />
+                     <img src={session.referenceAssets?.[0]?.croppedBase64 || session.sourceImageStub} className="w-full h-full object-cover opacity-80 group-hover:opacity-100" alt="thumb" />
                    </div>
                    <div className="flex-1 min-w-0">
                      <div className="flex justify-between items-start">

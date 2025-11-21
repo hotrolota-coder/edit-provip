@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { AppState, GeneratedImage, AnalysisResult, AlbumSession, ReferenceImage } from './types';
+import { AppState, GeneratedImage, AnalysisResult, AlbumSession, ReferenceAsset } from './types';
 import { analyzeImageIdentity, generateCharacterImage } from './services/geminiService';
 import { getRandomPoses } from './constants';
-import { Button, Card, Badge, QuantitySelector, ReferenceThumbnail } from './components/UIComponents';
+import { Button, Card, Badge, QuantitySelector, AssetStack } from './components/UIComponents';
 import { 
   UploadIcon, SparklesIcon, LayersIcon, CameraIcon, 
   EyeIcon, LockIcon, MaximizeIcon, HistoryIcon, SettingsIcon, TrashIcon
@@ -17,22 +17,19 @@ import { Lightbox } from './components/Lightbox';
 
 // Keys for local storage
 const STORAGE_KEYS = {
-  ALBUM: 'qs_album_v1',
-  ANALYSIS: 'qs_analysis_v1',
-  DECK: 'qs_deck_v1', // New key for reference deck
-  HISTORY: 'qs_history_v1',
-  CROP: 'qs_crop_v1' // Added to fix missing property error
+  ALBUM: 'qs_album_v2',
+  ANALYSIS: 'qs_analysis_v2',
+  ASSETS: 'qs_assets_v2',
+  HISTORY: 'qs_history_v2'
 };
 
 export default function App() {
   const [state, setState] = useState<AppState>(AppState.IDLE);
   
-  // NEW: Reference Deck State (Array of images)
-  const [referenceDeck, setReferenceDeck] = useState<ReferenceImage[]>([]);
+  // Multi-Reference State
+  const [referenceAssets, setReferenceAssets] = useState<ReferenceAsset[]>([]);
+  const [cropQueue, setCropQueue] = useState<string[]>([]); // Queue of raw base64s waiting for crop
   
-  // Temporary state for the image currently being processed/cropped
-  const [rawImageForCrop, setRawImageForCrop] = useState<string | null>(null); 
-
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [imageCount, setImageCount] = useState<number>(3);
@@ -57,23 +54,18 @@ export default function App() {
     try {
       const savedAlbum = localStorage.getItem(STORAGE_KEYS.ALBUM);
       const savedAnalysis = localStorage.getItem(STORAGE_KEYS.ANALYSIS);
-      const savedDeck = localStorage.getItem(STORAGE_KEYS.DECK);
+      const savedAssets = localStorage.getItem(STORAGE_KEYS.ASSETS);
       const savedHistory = localStorage.getItem(STORAGE_KEYS.HISTORY);
 
-      if (savedDeck) {
-        setReferenceDeck(JSON.parse(savedDeck));
-      }
+      if (savedAssets) setReferenceAssets(JSON.parse(savedAssets));
       if (savedAnalysis) {
         setAnalysis(JSON.parse(savedAnalysis));
-        // If we have analysis and deck, we are ready
-        if (JSON.parse(savedDeck || '[]').length > 0) {
-           setState(AppState.READY_TO_GENERATE);
-        }
+        setState(AppState.READY_TO_GENERATE);
       }
       if (savedAlbum) {
          const images = JSON.parse(savedAlbum);
          setGeneratedImages(images);
-         if (images.length > 0 && state === AppState.IDLE) setState(AppState.COMPLETE);
+         if (images.length > 0) setState(AppState.COMPLETE);
       }
       if (savedHistory) setHistory(JSON.parse(savedHistory));
 
@@ -103,19 +95,8 @@ export default function App() {
         setShowSettings(true); // Prompt user if no key
       }
     } else {
-      // Fallback for env var - SAFE CHECK
-      let hasEnvKey = false;
-      try {
-        // @ts-ignore
-        if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-          hasEnvKey = true;
-        }
-      } catch (e) {
-        // Ignore process error
-      }
-      
-      setApiKeyStatus(hasEnvKey ? 'set' : 'unset');
-      if (!hasEnvKey) setShowSettings(true);
+      // Fallback for env var
+      setApiKeyStatus('set'); 
     }
   };
 
@@ -124,27 +105,37 @@ export default function App() {
     try {
       if (generatedImages.length > 0) localStorage.setItem(STORAGE_KEYS.ALBUM, JSON.stringify(generatedImages));
       if (analysis) localStorage.setItem(STORAGE_KEYS.ANALYSIS, JSON.stringify(analysis));
-      if (referenceDeck.length > 0) localStorage.setItem(STORAGE_KEYS.DECK, JSON.stringify(referenceDeck));
+      if (referenceAssets.length > 0) localStorage.setItem(STORAGE_KEYS.ASSETS, JSON.stringify(referenceAssets));
       localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
     } catch (e) {
       console.warn("Storage quota exceeded or error", e);
-      // Fallback: Try to save only history and deck, skip big album
     }
-  }, [generatedImages, analysis, referenceDeck, history]);
+  }, [generatedImages, analysis, referenceAssets, history]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) processFile(file);
+    if (event.target.files && event.target.files.length > 0) {
+      // Convert FileList to Array
+      const files = Array.from(event.target.files);
+      processFiles(files);
+    }
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const processFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result as string;
-      setRawImageForCrop(base64);
-      setState(AppState.CROPPING);
-    };
-    reader.readAsDataURL(file);
+  const processFiles = async (files: File[]) => {
+    const readers = files.map(file => {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    });
+
+    const results = await Promise.all(readers);
+    
+    // Add to queue. This triggers the CropInterface via useEffect or State check
+    setCropQueue(prev => [...prev, ...results]);
+    setState(AppState.CROPPING);
   };
 
   // PASTE HANDLER
@@ -157,7 +148,7 @@ export default function App() {
           if (items[i].type.indexOf('image') !== -1) {
             const file = items[i].getAsFile();
             if (file) {
-              processFile(file);
+              processFiles([file]);
               e.preventDefault();
               break;
             }
@@ -177,78 +168,92 @@ export default function App() {
       id: Date.now().toString(),
       timestamp: Date.now(),
       images: [...generatedImages],
-      referenceDeck: [...referenceDeck],
+      referenceAssets: [...referenceAssets],
       analysisSummary: analysis ? analysis.outfit : 'Unknown Session'
     };
 
     setHistory(prev => [newSession, ...prev]);
   };
 
-  // Triggered when user finishes cropping ONE image
   const handleCropConfirm = (croppedBase64: string) => {
-    if (!rawImageForCrop) return;
-    
-    const newReference: ReferenceImage = {
-      id: Date.now().toString(),
-      original: rawImageForCrop,
-      crop: croppedBase64,
-      timestamp: Date.now()
+    // Get the current raw image being processed (first in queue)
+    const currentRaw = cropQueue[0];
+    if (!currentRaw) return;
+
+    const newAsset: ReferenceAsset = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      originalBase64: currentRaw,
+      croppedBase64: croppedBase64,
+      timestamp: Date.now(),
+      isPrimary: referenceAssets.length === 0 // First one uploaded is primary
     };
 
-    // Add to deck
-    const newDeck = [...referenceDeck, newReference];
-    setReferenceDeck(newDeck);
-    setRawImageForCrop(null);
-    setState(AppState.IDLE);
-    
-    // Reset file input
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    setReferenceAssets(prev => [...prev, newAsset]);
+
+    // Remove processed item from queue
+    const newQueue = cropQueue.slice(1);
+    setCropQueue(newQueue);
+
+    if (newQueue.length === 0) {
+      // All cropped!
+      // If this was the FIRST upload ever, analyze immediately? 
+      // OR, just go to Idle and let user click Analyze. 
+      // Let's Auto-Analyze if it's the initial setup, otherwise just go to IDLE so they can see the stack.
+      
+      if (referenceAssets.length === 0) { 
+        // This was the first one added
+        analyzeSource([newAsset]);
+      } else {
+        setState(AppState.IDLE);
+        // Should we re-analyze automatically if they added a new ref? 
+        // Better to let them click "Update Analysis" or "Analyze" to save tokens.
+      }
+    }
+    // If queue has more, CropInterface stays open for the next one automatically (handled by render)
   };
 
   const handleCropCancel = () => {
-    setRawImageForCrop(null);
-    setState(AppState.IDLE);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const removeFromDeck = (id: string) => {
-    const newDeck = referenceDeck.filter(ref => ref.id !== id);
-    setReferenceDeck(newDeck);
-    if (newDeck.length === 0) {
-      setAnalysis(null); // Clear analysis if no data
+    // Skip current item
+    const newQueue = cropQueue.slice(1);
+    setCropQueue(newQueue);
+    if (newQueue.length === 0) {
+      setState(AppState.IDLE);
     }
   };
 
-  // Analyzes ALL images in the deck
-  const startCompositeAnalysis = async () => {
-    if (referenceDeck.length === 0) return;
+  const handleRemoveAsset = (id: string) => {
+    setReferenceAssets(prev => {
+      const filtered = prev.filter(a => a.id !== id);
+      // If we deleted the primary, make the new first item primary
+      if (filtered.length > 0 && !filtered.some(a => a.isPrimary)) {
+        filtered[0].isPrimary = true;
+      }
+      return filtered;
+    });
+  };
 
+  const analyzeSource = async (assetsToAnalyze: ReferenceAsset[]) => {
     setState(AppState.ANALYZING);
-    const msg = referenceDeck.length === 1 
-      ? "Analyzing single reference identity..." 
-      : `Analyzing ${referenceDeck.length} reference inputs for composite identity...`;
-    setProgressMessage(msg);
+    setProgressMessage(
+      assetsToAnalyze.length > 1 
+        ? `Fusing identity matrix from ${assetsToAnalyze.length} sources...` 
+        : 'Scanning biometrics, angles & expression habits...'
+    );
     
     try {
-      // 1. Archive existing session if we are starting a fresh analysis sequence
-      if (generatedImages.length > 0) {
-          saveCurrentSessionToHistory();
-          setGeneratedImages([]);
-          setCompletedCount(0);
-      }
-
-      const result = await analyzeImageIdentity(referenceDeck);
+      const result = await analyzeImageIdentity(assetsToAnalyze, 'image/jpeg');
       setAnalysis(result);
       setState(AppState.READY_TO_GENERATE);
     } catch (error) {
       console.error(error);
       setState(AppState.ERROR);
-      setProgressMessage('Analysis failed. Please check your API Key in Settings.');
+      setProgressMessage('Scan interrupted. Please check your API Connection in Settings.');
     }
   };
 
+  // MODIFIED: Automatically archives current session before generating new one
   const generateAlbum = async () => {
-    if (!analysis || referenceDeck.length === 0) return;
+    if (!analysis || referenceAssets.length === 0) return;
 
     // 1. Archive existing if meaningful
     if (generatedImages.length > 0) {
@@ -263,12 +268,16 @@ export default function App() {
     try {
       const poses = getRandomPoses(imageCount);
       
+      // Find Primary Asset
+      const primaryAsset = referenceAssets.find(a => a.isPrimary) || referenceAssets[0];
+      const sourceBase64Data = primaryAsset.originalBase64.split(',')[1];
+      
       const generateSingle = async (pose: typeof poses[0]) => {
         try {
           const url = await generateCharacterImage(
             analysis, 
             pose.prompt,
-            referenceDeck // Pass the entire deck, service handles picking the best refs
+            sourceBase64Data 
           );
           
           const newImage: GeneratedImage = {
@@ -286,7 +295,7 @@ export default function App() {
         }
       };
 
-      setProgressMessage(`Synthesizing photos...`);
+      setProgressMessage(`Synthesizing Friend POV...`);
       
       for (const pose of poses) {
           await generateSingle(pose);
@@ -296,22 +305,19 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setState(AppState.ERROR);
-      setProgressMessage('Generation sequence interrupted. Check API Key.');
+      setProgressMessage('Generation sequence interrupted. Check connectivity.');
     }
   };
 
   const resetApp = () => {
-    if (generatedImages.length > 0) {
-       saveCurrentSessionToHistory();
-    }
+    if (generatedImages.length > 0) saveCurrentSessionToHistory();
 
     localStorage.removeItem(STORAGE_KEYS.ALBUM);
     localStorage.removeItem(STORAGE_KEYS.ANALYSIS);
-    localStorage.removeItem(STORAGE_KEYS.DECK);
-    localStorage.removeItem(STORAGE_KEYS.CROP); // Cleanup legacy key
+    localStorage.removeItem(STORAGE_KEYS.ASSETS);
 
-    setReferenceDeck([]);
-    setRawImageForCrop(null);
+    setReferenceAssets([]);
+    setCropQueue([]);
     setState(AppState.IDLE);
     setAnalysis(null);
     setGeneratedImages([]);
@@ -344,20 +350,7 @@ export default function App() {
      if (generatedImages.length > 0) saveCurrentSessionToHistory();
 
      setGeneratedImages(session.images);
-     // Check if this is a legacy session (single stub) or new (array)
-     if (session.referenceDeck) {
-       setReferenceDeck(session.referenceDeck);
-     } else if ((session as any).sourceImageStub) {
-        // Legacy support
-        const legacyStub = (session as any).sourceImageStub;
-        setReferenceDeck([{
-           id: 'legacy',
-           crop: legacyStub,
-           original: legacyStub, // We don't have original in legacy, use stub
-           timestamp: session.timestamp
-        }]);
-     }
-
+     setReferenceAssets(session.referenceAssets); 
      setAnalysis({ outfit: session.analysisSummary } as AnalysisResult); 
      setState(AppState.COMPLETE);
      setShowHistoryModal(false);
@@ -380,13 +373,11 @@ export default function App() {
   const handleBatchDownload = async (images: GeneratedImage[]) => {
     if (images.length === 0) return;
     setIsBatchDownloading(true);
-    
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
       downloadImage(img.url, img.id);
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
     setIsBatchDownloading(false);
   };
 
@@ -407,10 +398,10 @@ export default function App() {
   return (
     <div className="min-h-screen bg-obsidian text-gray-100 selection:bg-neon-blue selection:text-black font-sans overflow-hidden">
       
-      {/* CROP INTERFACE OVERLAY */}
-      {state === AppState.CROPPING && rawImageForCrop && (
+      {/* CROP INTERFACE OVERLAY (Handles Queue) */}
+      {state === AppState.CROPPING && cropQueue.length > 0 && (
         <CropInterface 
-          imageUrl={rawImageForCrop} 
+          imageUrl={cropQueue[0]} 
           onConfirm={handleCropConfirm} 
           onCancel={handleCropCancel} 
         />
@@ -439,7 +430,7 @@ export default function App() {
       <Lightbox 
         viewingIndex={viewingIndex}
         generatedImages={viewingHistorySession ? viewingHistorySession.images : generatedImages}
-        sourceImage={referenceDeck.length > 0 ? referenceDeck[0].original : null} // Show first ref as fallback in comparison
+        sourceImage={referenceAssets.find(a => a.isPrimary)?.originalBase64 || null}
         isComparing={isComparing}
         onClose={() => { setViewingIndex(null); setViewingHistorySession(null); }}
         onNavigate={navigateImage}
@@ -464,18 +455,16 @@ export default function App() {
               <div className="animate-float">
                 <CameraIcon />
               </div>
-              {/* Status Indicator Dot */}
               <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-black ${apiKeyStatus === 'set' ? 'bg-green-400' : 'bg-red-500 animate-pulse'}`} />
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tighter text-white flex items-center gap-2">
                 QuantumSnap <Badge color="neon-blue">STUDIO</Badge>
               </h1>
-              <p className="text-xs text-gray-500 font-mono tracking-wider">MULTI-REFERENCE ANALYSIS</p>
+              <p className="text-xs text-gray-500 font-mono tracking-wider">AI IDENTITY PRESERVATION</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* SETTINGS TOGGLE */}
             <Button 
                variant="ghost"
                onClick={() => setShowSettings(true)}
@@ -489,146 +478,126 @@ export default function App() {
         {/* Main Workspace */}
         <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0 pb-4">
           
-          {/* LEFT PANEL: Reference Deck & Controls */}
+          {/* LEFT PANEL: Controls & Input */}
           <section className="lg:col-span-4 flex flex-col gap-6 h-full overflow-y-auto pr-2 scrollbar-hide">
             
-            {/* Reference Deck Area */}
-            <div className="space-y-4">
-               <div className="flex justify-between items-end">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                    <LayersIcon /> Reference Deck ({referenceDeck.length})
-                  </h3>
-                  {referenceDeck.length > 0 && (
-                     <button onClick={resetApp} className="text-[10px] text-red-400 hover:text-red-300 transition-colors">
-                       Clear All
-                     </button>
-                  )}
-               </div>
-
-               {/* Grid of Uploaded Images */}
-               {referenceDeck.length > 0 && (
-                 <div className="flex gap-3 flex-wrap">
-                    {referenceDeck.map((ref) => (
-                       <ReferenceThumbnail 
-                          key={ref.id} 
-                          image={ref.original} 
-                          crop={ref.crop}
-                          onDelete={() => removeFromDeck(ref.id)}
-                       />
-                    ))}
-                    
-                    {/* Add Button (Small) */}
-                    {referenceDeck.length < 5 && (
-                       <button 
-                          onClick={() => fileInputRef.current?.click()}
-                          className="w-16 h-20 sm:w-20 sm:h-24 rounded-lg border border-dashed border-white/20 hover:border-neon-blue hover:bg-neon-blue/5 flex items-center justify-center transition-all group"
-                       >
-                          <div className="w-6 h-6 text-gray-500 group-hover:text-neon-blue transition-colors"><UploadIcon /></div>
-                       </button>
-                    )}
-                 </div>
-               )}
-
-               {/* Main Upload Area (Shows only if deck is empty) */}
-               {referenceDeck.length === 0 && (
-                  <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="glass-panel border-dashed border-2 border-white/10 hover:border-neon-blue/40 rounded-3xl h-64 flex flex-col items-center justify-center cursor-pointer transition-all duration-500 group hover:bg-white/5 relative overflow-hidden"
-                  >
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept="image/*"
-                      className="hidden" 
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-tr from-neon-blue/0 via-neon-blue/5 to-neon-purple/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <div className="w-16 h-16 rounded-full bg-black/50 border border-white/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-500 shadow-2xl">
-                       <UploadIcon />
-                    </div>
-                    <h3 className="text-lg font-bold text-white mb-1">Add Reference Photo</h3>
-                    <p className="text-xs text-gray-400 text-center px-8">
-                       Upload 1 or more photos. (Multiple photos improve accuracy).
-                    </p>
-                  </div>
-               )}
-            </div>
-
-            {/* Actions Panel */}
-            <div className="space-y-6">
+            {/* Upload Card */}
+            <div className="relative group shrink-0">
+              <input 
+                type="file" 
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*"
+                className="hidden" 
+                multiple // Enable multi-file selection
+              />
               
-              {/* Analysis Trigger */}
-              {referenceDeck.length > 0 && !analysis && (
-                 <Card className="border-neon-blue/20 animate-slideUp">
-                    <div className="text-center space-y-4">
-                       <p className="text-xs text-gray-300">
-                         {referenceDeck.length} photo{referenceDeck.length > 1 ? 's' : ''} ready for analysis.
-                       </p>
-                       <Button 
-                         onClick={startCompositeAnalysis} 
-                         className="w-full shadow-[0_0_20px_rgba(0,243,255,0.2)]"
-                         isLoading={state === AppState.ANALYZING}
-                         icon={<EyeIcon />}
-                       >
-                         {state === AppState.ANALYZING 
-                            ? 'Analyzing...' 
-                            : referenceDeck.length > 1 
-                                ? 'Analyze Composite Identity' 
-                                : 'Analyze Identity'}
-                       </Button>
-                    </div>
-                 </Card>
-              )}
+              {referenceAssets.length === 0 ? (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="glass-panel border-dashed border-2 border-white/10 hover:border-neon-blue/40 rounded-3xl h-80 flex flex-col items-center justify-center cursor-pointer transition-all duration-500 group-hover:bg-white/5 relative overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-tr from-neon-blue/0 via-neon-blue/5 to-neon-purple/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <div className="w-24 h-24 rounded-full bg-black/50 border border-white/10 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-500 shadow-2xl">
+                     <UploadIcon />
+                  </div>
+                  <h3 className="text-2xl font-bold text-white mb-2">Upload Reference(s)</h3>
+                  <p className="text-sm text-gray-400 text-center px-8 font-light">
+                    Drop one or multiple photos. <br/>I will fuse them to learn your vibe.
+                  </p>
+                </div>
+              ) : (
+                <div className="relative rounded-3xl overflow-hidden glass-panel border-neon-blue/30 shadow-[0_0_40px_rgba(0,243,255,0.15)] transition-all duration-500 flex flex-col p-4 gap-4">
+                   
+                   {/* Asset Stack Visualization */}
+                   <AssetStack 
+                      assets={referenceAssets} 
+                      onRemove={handleRemoveAsset}
+                      onAddClick={() => fileInputRef.current?.click()} 
+                   />
 
-              {/* Generation Panel (Only after Analysis) */}
-              {analysis && (
-                <Card className="space-y-6 animate-[slideUp_0.4s_cubic-bezier(0.16,1,0.3,1)] border-neon-blue/20 relative overflow-hidden">
-                  {/* Loading Overlay for Analyzing */}
-                  {state === AppState.ANALYZING && (
-                     <div className="absolute inset-0 z-20 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                   {/* Main Preview (Primary) */}
+                   <div className="relative h-48 w-full rounded-xl overflow-hidden border border-white/10 bg-black/50">
+                      <img 
+                        src={referenceAssets.find(a => a.isPrimary)?.originalBase64} 
+                        alt="Primary Source" 
+                        className="w-full h-full object-contain opacity-60" 
+                      />
+                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono text-neon-blue border border-neon-blue/30">
+                        PRIMARY ANCHOR
+                      </div>
+                   </div>
+
+                   {/* Analysis Status */}
+                   {state === AppState.ANALYZING && (
+                     <div className="absolute inset-0 z-20 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-3xl">
                        <div className="w-full h-1 bg-neon-blue/80 shadow-[0_0_20px_#00f3ff] animate-scan absolute top-0" />
-                       <div className="text-neon-blue font-mono text-xs animate-pulse mb-2">BUILDING BIOMETRIC PROFILE...</div>
+                       <div className="text-neon-blue font-mono text-xs animate-pulse mb-2 text-center px-4">
+                         {progressMessage}
+                       </div>
                      </div>
                    )}
 
-                  <div className="flex flex-col gap-4 pb-6 border-b border-white/5">
-                    <div className="flex items-center justify-between text-green-400">
-                      <div className="flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                        <h3 className="text-xs font-bold uppercase tracking-wider">Profile Locked</h3>
-                      </div>
-                      <Badge color="neon-purple">{referenceDeck.length} SOURCE{referenceDeck.length > 1 ? 'S' : ''}</Badge>
+                   {/* Re-Analyze Trigger (Only if idle and has assets) */}
+                   {state === AppState.IDLE && referenceAssets.length > 0 && (
+                      <Button 
+                        variant="secondary" 
+                        onClick={() => analyzeSource(referenceAssets)}
+                        className="w-full py-2 text-xs"
+                      >
+                        Re-Analyze Fusion ({referenceAssets.length})
+                      </Button>
+                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Configuration Panel */}
+            {analysis && (
+              <Card className="space-y-6 animate-[slideUp_0.6s_cubic-bezier(0.16,1,0.3,1)] border-neon-blue/20">
+                <div className="flex flex-col gap-4 pb-6 border-b border-white/5">
+                  <div className="flex items-center justify-between text-green-400">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                      <h3 className="text-sm font-bold uppercase tracking-wider">Fusion Profile Ready</h3>
                     </div>
-                    
+                    <button onClick={resetApp} className="text-[10px] px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300 transition-colors">
+                        Reset
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
                     <div className="bg-white/5 rounded-lg p-3 text-xs border border-white/5">
                        <div className="flex items-center gap-2 text-gray-400 mb-1 uppercase text-[10px] font-bold">
-                         <LockIcon /> {referenceDeck.length > 1 ? 'Consistent Traits' : 'Identified Traits'}
+                         <LockIcon /> Identity Matrix
                        </div>
-                       <p className="text-gray-200 line-clamp-3 leading-relaxed">
-                          <span className="text-neon-blue">Vibe:</span> {analysis.photographicStyle}
+                       <p className="text-gray-200 line-clamp-4 leading-relaxed">
+                          <span className="text-neon-blue">Style:</span> {analysis.photographicStyle}
                           <br/>
-                          <span className="text-neon-purple">Look:</span> {analysis.outfit}
+                          <span className="text-neon-purple">Vibe:</span> {analysis.vibeAnalysis}
+                          <br/>
+                          <span className="text-gray-400">Habits:</span> {analysis.consistencyNotes}
                        </p>
                     </div>
                   </div>
+                </div>
 
-                  <div className="space-y-6">
-                    <QuantitySelector value={imageCount} onChange={setImageCount} />
-                    
-                    <Button 
-                      className="w-full py-4 text-lg shadow-[0_0_30px_rgba(255,255,255,0.1)]" 
-                      onClick={generateAlbum}
-                      isLoading={state === AppState.GENERATING}
-                      icon={<SparklesIcon />}
-                    >
-                      {state === AppState.GENERATING 
-                        ? `Synthesizing...` 
-                        : 'Generate Album'}
-                    </Button>
-                  </div>
-                </Card>
-              )}
-            </div>
+                <div className="space-y-6">
+                  <QuantitySelector value={imageCount} onChange={setImageCount} />
+                  
+                  <Button 
+                    className="w-full py-4 text-lg shadow-[0_0_30px_rgba(255,255,255,0.1)]" 
+                    onClick={generateAlbum}
+                    isLoading={state === AppState.GENERATING}
+                    icon={<SparklesIcon />}
+                  >
+                    {state === AppState.GENERATING 
+                      ? `Synthesizing...` 
+                      : 'Generate Fusion Album'}
+                  </Button>
+                </div>
+              </Card>
+            )}
           </section>
 
           {/* RIGHT PANEL: Gallery & History Stream */}
@@ -672,7 +641,7 @@ export default function App() {
                   <div className="w-20 h-20 mb-6 opacity-10 text-white">
                     <SparklesIcon />
                   </div>
-                  <p className="text-gray-500 text-lg font-light">Build your reference deck to start.</p>
+                  <p className="text-gray-500 text-lg font-light">Ready to generate.</p>
                   {apiKeyStatus === 'unset' && (
                     <Button variant="secondary" onClick={() => setShowSettings(true)} className="mt-4">
                       Configure API to Start
@@ -728,13 +697,12 @@ export default function App() {
                       <div key={session.id} className="bg-white/5 rounded-3xl p-6 border border-white/5 hover:border-white/10 transition-colors">
                         <div className="flex justify-between items-center mb-4">
                           <div className="flex items-center gap-3">
-                            {/* Stacked Thumbs for History */}
-                            <div className="flex -space-x-4">
-                                {(session.referenceDeck || ((session as any).sourceImageStub ? [{crop: (session as any).sourceImageStub}] : [])).slice(0,3).map((ref: any, i: number) => (
-                                   <div key={i} className="w-10 h-10 rounded-full bg-black overflow-hidden border border-white/10 relative z-0 hover:z-10 transition-all">
-                                      <img src={ref.crop} className="w-full h-full object-cover" alt="thumb" />
-                                   </div>
-                                ))}
+                            <div className="w-10 h-10 rounded-full bg-black overflow-hidden border border-white/10 relative">
+                               {/* Use first available cropped thumb from asset list */}
+                               <img src={session.referenceAssets?.[0]?.croppedBase64 || session.sourceImageStub} className="w-full h-full object-cover" alt="thumb" />
+                               {session.referenceAssets?.length > 1 && (
+                                 <div className="absolute bottom-0 right-0 bg-neon-purple text-black text-[8px] px-1 font-bold">+{session.referenceAssets.length - 1}</div>
+                               )}
                             </div>
                             <div>
                               <div className="text-xs text-gray-400">{new Date(session.timestamp).toLocaleString()}</div>
@@ -799,7 +767,12 @@ export default function App() {
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+        .snap-x {
+            scroll-snap-type: x mandatory;
+        }
+        .snap-start {
+            scroll-snap-align: start;
+        }
       `}</style>
     </div>
   );
-}

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button, Badge } from './UIComponents';
-import { SettingsIcon, XIcon, LinkIcon, WarningIcon, LockIcon, EyeIcon } from './Icons';
+import { SettingsIcon, XIcon, LinkIcon, WarningIcon, LockIcon } from './Icons';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,7 +22,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [manualKey, setManualKey] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
-  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     const savedKey = localStorage.getItem('qs_api_key');
@@ -30,12 +29,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen]);
 
   const handleSaveKey = () => {
-    // Sanitize input (trim spaces, remove quotes if user pasted them by accident)
-    const sanitizedKey = manualKey.trim().replace(/['"]/g, '');
-    
-    if (sanitizedKey.length > 0) {
-      localStorage.setItem('qs_api_key', sanitizedKey);
-      setManualKey(sanitizedKey); // Update state with sanitized value
+    if (manualKey.trim().length > 0) {
+      localStorage.setItem('qs_api_key', manualKey.trim());
       setSaveStatus('Saved securely to browser');
       setTimeout(() => {
         setSaveStatus('');
@@ -45,9 +40,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } else {
       localStorage.removeItem('qs_api_key');
       setSaveStatus('Key removed');
-      setTimeout(() => {
-        setSaveStatus('');
-      }, 1000);
     }
   };
 
@@ -91,19 +83,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="text-[10px] font-bold text-gray-400 mb-1 block">MANUAL KEY ENTRY (OVERRIDES AUTO)</label>
                   <div className="relative flex items-center">
                     <input 
-                      type={showKey ? "text" : "password"}
+                      type="password" 
                       value={manualKey}
                       onChange={(e) => setManualKey(e.target.value)}
                       placeholder="Paste your Gemini API Key here..."
-                      className="w-full bg-black/50 border border-white/20 rounded-lg pl-9 pr-10 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-neon-blue focus:shadow-[0_0_10px_rgba(0,243,255,0.2)] transition-all font-mono"
+                      className="w-full bg-black/50 border border-white/20 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-neon-blue focus:shadow-[0_0_10px_rgba(0,243,255,0.2)] transition-all"
                     />
                     <div className="absolute left-3 text-gray-500"><LockIcon /></div>
-                    <button 
-                      onClick={() => setShowKey(!showKey)} 
-                      className="absolute right-3 text-gray-500 hover:text-white focus:outline-none"
-                    >
-                      <EyeIcon />
-                    </button>
                   </div>
                   {saveStatus && <p className="text-green-400 text-xs mt-2 animate-pulse">{saveStatus}</p>}
                </div>
