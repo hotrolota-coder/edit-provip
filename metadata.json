@@ -1,0 +1,7 @@
+{
+  "name": "QuantumSnap ID",
+  "description": "A next-generation AI photo studio that synthesizes consistent character albums from a single reference image using advanced biometric analysis.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,0 +1,102 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuantumSnap ID - Studio Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              obsidian: '#050505',
+              charcoal: '#0f0f12',
+              glass: 'rgba(255, 255, 255, 0.05)',
+              'glass-hover': 'rgba(255, 255, 255, 0.1)',
+              neon: {
+                blue: '#00f3ff',
+                purple: '#bc13fe',
+                pink: '#ff0055'
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['Fira Code', 'monospace'],
+            },
+            animation: {
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'float': 'float 6s ease-in-out infinite',
+              'scan': 'scan 2s linear infinite',
+              'spin-slow': 'spin 12s linear infinite',
+              'shimmer': 'shimmer 2s infinite',
+              'zoom-in': 'zoomIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            },
+            keyframes: {
+              float: {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-10px)' },
+              },
+              scan: {
+                '0%': { top: '-10%' },
+                '100%': { top: '110%' },
+              },
+              shimmer: {
+                '100%': { transform: 'translateX(100%)' }
+              },
+              zoomIn: {
+                '0%': { opacity: 0, transform: 'scale(0.95)' },
+                '100%': { opacity: 1, transform: 'scale(1)' }
+              }
+            },
+            backgroundImage: {
+              'cyber-grid': 'linear-gradient(to right, #222 1px, transparent 1px), linear-gradient(to bottom, #222 1px, transparent 1px)',
+            }
+          },
+        },
+      };
+    </script>
+    <style>
+      body {
+        background-color: #050505;
+        color: #ffffff;
+        overflow: hidden; /* App manages overflow */
+      }
+      .glass-panel {
+        background: rgba(20, 20, 25, 0.6);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      /* Custom Scrollbar for elements that need it */
+      ::-webkit-scrollbar {
+        width: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #333;
+        border-radius: 2px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
